@@ -66,9 +66,9 @@ fn decode_png(data: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     Ok((w as u32, h as u32, rgba))
 }
 
-fn resize_nearest(src: &[u8], src_w: u32, src_h: u32) -> (u32, u32, Vec<u8>) {
-    let scale = (MAX_THUMB_SIZE as f32 / src_w as f32)
-        .min(MAX_THUMB_SIZE as f32 / src_h as f32)
+fn resize_nearest(src: &[u8], src_w: u32, src_h: u32, max_width: u32, max_height: u32) -> (u32, u32, Vec<u8>) {
+    let scale = (max_width as f32 / src_w as f32)
+        .min(max_height as f32 / src_h as f32)
         .min(1.0);
 
     let dst_w = ((src_w as f32 * scale) as u32).max(1);
@@ -104,18 +104,18 @@ fn encode_png(w: u32, h: u32, rgba: &[u8], output_path: &str) -> Result<(), Stri
         .map_err(|e| format!("PNG write error: {}", e))
 }
 
-fn process_png(data: &[u8], output_path: &str) -> Result<(), String> {
+fn process_png(data: &[u8], output_path: &str, max_width: u32, max_height: u32) -> Result<(), String> {
     let (w, h, pixels) = decode_png(data)?;
-    if w <= MAX_THUMB_SIZE && h <= MAX_THUMB_SIZE {
+    if w <= max_width && h <= max_height {
         // already small enough, re-encode as-is
         encode_png(w, h, &pixels, output_path)
     } else {
-        let (rw, rh, resized) = resize_nearest(&pixels, w, h);
+        let (rw, rh, resized) = resize_nearest(&pixels, w, h, max_width, max_height);
         encode_png(rw, rh, &resized, output_path)
     }
 }
 
-fn extract_thumbnail(input_path: &str, output_path: &str) -> Result<(), String> {
+fn extract_thumbnail(input_path: &str, output_path: &str, max_width: u32, max_height: u32) -> Result<(), String> {
     use rusqlite::Connection;
 
     let file = File::open(input_path)
@@ -130,7 +130,7 @@ fn extract_thumbnail(input_path: &str, output_path: &str) -> Result<(), String> 
     let search_end = mmap.len();
     if let Some((rel_start, rel_end)) = find_valid_png(&mmap[sqlite_offset..search_end]) {
         let bytes = &mmap[sqlite_offset + rel_start..sqlite_offset + rel_end];
-        if process_png(bytes, output_path).is_ok() {
+        if process_png(bytes, output_path, max_width, max_height).is_ok() {
             return Ok(());
         }
     }
@@ -156,16 +156,39 @@ fn extract_thumbnail(input_path: &str, output_path: &str) -> Result<(), String> 
 
     let (start, end) = find_valid_png(&blob)
         .ok_or("No valid PNG found in CanvasPreview blob")?;
-    process_png(&blob[start..end], output_path)
+    process_png(&blob[start..end], output_path, max_width, max_height)
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
-        eprintln!("Usage: clip-thumbnailer [input_file] [output_file]");
+        eprintln!("Usage: clip-thumbnailer <input_file> <output_file> [max_width (default: {})] [max_height (default: max_width)]", MAX_THUMB_SIZE);
         process::exit(1);
     }
-    if let Err(e) = extract_thumbnail(&args[1], &args[2]) {
+
+    let max_width = args
+        .get(3)
+        .map(|s| s.parse::<u32>())
+        .unwrap_or(Ok(MAX_THUMB_SIZE));
+    let max_width = if let Ok(mw) = max_width && mw > 0 {
+        mw
+    } else {
+        eprintln!("max_width must be a positive integer");
+        process::exit(1);
+    };
+
+    let max_height = args
+        .get(4)
+        .map(|s| s.parse::<u32>())
+        .unwrap_or(Ok(max_width));
+    let max_height = if let Ok(mh) = max_height && mh > 0 {
+        mh
+    } else {
+        eprintln!("max_height must be a positive integer");
+        process::exit(1);
+    };
+
+    if let Err(e) = extract_thumbnail(&args[1], &args[2], max_width, max_height) {
         eprintln!("Error: {}", e);
         process::exit(1);
     }
