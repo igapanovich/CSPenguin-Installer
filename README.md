@@ -1,3 +1,8 @@
+# About this fork
+This fork makes a small change to clip-thumbnailer to allow user to specify the desired max width and height. This makes it a more general flattening tool for clip files.
+
+---
+
 ![CSP running on Linux](assets/Screenshot_20260318_041049.png)
 
 # video tutorial 👇
